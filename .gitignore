@@ -1,0 +1,14 @@
+report
+pulsars
+
+venv
+*.pdf
+*.png
+
+# vim temporal files
+.*.swp
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
