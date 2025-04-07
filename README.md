@@ -47,7 +47,7 @@ This repository provides a Python-based framework for simulating and analyzing g
 1. **Clone the repository:**
 
     ```bash
-    git clone https://github.com/yourusername/gw-interferometry.git
+    git clone https://github.com/StepanRepo/gw-interferometry.git
     cd gw-interferometry
     ```
 
