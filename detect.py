@@ -1,6 +1,7 @@
 #! venv/bin/python
 
 import numpy as np
+import scipy as sp
 import astropy.units as u
 from typing import List, Union, Tuple
 from dataclasses import dataclass
@@ -12,7 +13,6 @@ from myplot import *
 set_tex()
 
 
-@dataclass
 class PTACorrelationDetector:
     """Calculates correlation patterns from the paper.
 
@@ -20,13 +20,17 @@ class PTACorrelationDetector:
         pulsars (List[Pulsar]): List of pulsars in the array
     """
 
-    pulsars: List['Pulsar']
+    def __init__(self, pulsars: List['Pulsar']):
+        n_pul = len(pulsars)
+
+        self.pulsars = pulsars
+        self._phases = np.zeros(n_pul * (n_pul+1) //2) * u.rad
 
     def pair_beam_pattern(self,
                                 i: int,
                                 j: int,
                                 gw_source: GWSource,
-                                phase_diff: u.Quantity = 0*u.rad) -> Union[float, np.ndarray]:
+                                phase_diff: u.Quantity = None) -> Union[float, np.ndarray]:
         """Calculate correlation for specific pulsar pair.
 
         Args:
@@ -37,9 +41,11 @@ class PTACorrelationDetector:
         Returns:
             Correlation value(s) ρ following equation (2.22)
         """
+
         # Convert inputs to numpy arrays
         theta = np.asarray(gw_source.theta.to(u.rad).value, dtype=np.float64)
         phi = np.asarray(gw_source.phi.to(u.rad).value, dtype=np.float64)
+
         omega = gw_source.frequency.to(u.rad/u.s).value
         delta_phi = phase_diff.to(u.rad).value
 
@@ -50,14 +56,13 @@ class PTACorrelationDetector:
         # Get unit vectors and angular separation
         p1_vec = p1.get_unit_vector()
         p2_vec = p2.get_unit_vector()
-        gamma = np.arccos(np.clip(np.dot(p1_vec, p2_vec), -1, 1))
 
         # Calculate general antenna pattern components
-        F1 = self._calculate_antenna_components(phi, theta, p1_vec)
-        F2 = self._calculate_antenna_components(phi, theta, p2_vec)
+        F1 = self._calculate_antenna_components(gw_source, p1_vec)
+        F2 = self._calculate_antenna_components(gw_source, p2_vec)
 
         # Calculate distance terms ℓ (in seconds)
-        omega_dir = gw_source.get_direction_vector()
+        omega_dir = gw_source.unit_vector
 
         dot1 = np.einsum('i,i...->...', p1_vec, omega_dir)
         dot2 = np.einsum('i,i...->...', p2_vec, omega_dir)
@@ -66,7 +71,8 @@ class PTACorrelationDetector:
         ell2 = p2.distance.to(u.s).value * (1 + dot2)
 
         # Calculate correlation components (equations 2.24-2.26)
-        B = 2 * gw_source.strain**2 * np.sin(omega*ell1/2) * np.sin(omega*ell2/2)
+        B = 2 * gw_source.strain**2  \
+                * np.sin(omega*ell1/2) * np.sin(omega*ell2/2)
         angle_diff = omega * (ell1 - ell2) / 2
 
         # Combine antenna patterns
@@ -83,9 +89,8 @@ class PTACorrelationDetector:
         #return correlation[0] if np.isscalar(gw_source.theta.value) else correlation
 
     def _calculate_antenna_components(self,
-                                   phi: np.ndarray,
-                                   theta: np.ndarray,
-                                   p_vec: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+                                      gw_source: GWSource,
+                                      p_vec: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Calculate general antenna pattern components F+ and F×.
 
         Args:
@@ -97,26 +102,13 @@ class PTACorrelationDetector:
             Tuple of (F+, F×) arrays
         """
         # GW direction unit vector
-        omega_dir = np.array([
-            np.sin(theta) * np.cos(phi),
-            np.sin(theta) * np.sin(phi),
-            np.cos(theta)
-        ])
-
-        # Polarization basis vectors
-        m = np.array([np.sin(phi), -np.cos(phi), np.zeros_like(phi)])
-        n = np.array([
-            np.cos(theta)*np.cos(phi),
-            np.cos(theta)*np.sin(phi),
-            -np.sin(theta)
-        ])
+        omega_dir = gw_source.unit_vector
 
         # Polarization tensors
-        e_plus = np.einsum('i...,j...->ij...', m, m) - np.einsum('i...,j...->ij...', n, n)
-        e_cross = np.einsum('i...,j...->ij...', m, n) + np.einsum('i...,j...->ij...', n, m)
+        e_plus = gw_source.e_plus
+        e_cross = gw_source.e_cross
 
         denom = 1 + np.einsum('i,i...->...', p_vec, omega_dir)
-
 
         # Antenna pattern calculation (general form)
         F_plus = 0.5 * np.einsum('i...,j...,ij...->...', p_vec, p_vec, e_plus) / denom
@@ -124,96 +116,123 @@ class PTACorrelationDetector:
 
         return F_plus, F_cross
 
+    def _get_arg(self, 
+                 i: int, 
+                 j: int) -> int:
+        N = len(self.pulsars)
+        return i*N + j - i*(i+1)//2
 
-def plot(f, *args, **kwargs):
-    n, m = f.shape
+    def fix_phases(self, phases: np.ndarray):
+        self._phases = phases
 
-    fig, ax = plt.subplots(subplot_kw={"projection": "mollweide"},
-                           figsize = (12,8))
+    def phase(self,
+              i: int,
+              j: int) -> u.Quantity:
 
-    #ax.imshow(ff1, extent = [-180, 180, -90, 90])
-    lon = np.linspace(-np.pi, np.pi, n)
-    lat = np.linspace(-np.pi/2., np.pi/2., m)
-    Lon,Lat = np.meshgrid(lon,lat)
+        arg = self._get_arg(i, j)
+        return self._phases[arg]
 
-    img = ax.pcolormesh(Lon, Lat, f, shading = "nearest",
-                  cmap = "hot",
-                  linewidth = 0, rasterized=True,
-                        *args, **kwargs)
-    ax.set_xlabel(r"$\varphi$")
-    ax.set_ylabel(r"$\theta$")
-    plt.colorbar(img, ax=ax, orientation='horizontal', shrink=0.6)
+    def observable_correlation(self,
+                               i: int, 
+                               j: int, 
+                               dt: u.Quantity = None):
+        psr1 = self.pulsars[i]
+        psr2 = self.pulsars[j]
 
+        mjd1 = psr1.mjd * u.day
+        mjd2 = psr2.mjd * u.day
 
-    return fig, ax
+        z1 = psr1.redshifts
+        z2 = psr2.redshifts
 
-def corr(psr1: Pulsar, 
-         psr2: Pulsar, 
-         dt: np.float64 = 0):
+        t0 = mjd1.min()
+        t1 = mjd1.max() - dt
 
-    mjd1 = psr1.mjd * u.day
-    mjd2 = psr2.mjd * u.day
+        T = mjd1.max() - mjd1.min()
 
-    z1 = psr1.redshifts
-    z2 = psr2.redshifts
+        t = np.linspace(t0, t1, len(mjd1))
 
-    t0 = mjd1.min()
-    t1 = mjd1.max() - dt
+        int_z1 = np.interp(t, mjd1, z1)
+        int_z2 = np.interp(t+dt, mjd2, z2)
 
-    T = mjd1.max() - mjd1.min()
+        denom = (T/ (T - dt)).to(u.dimensionless_unscaled)
 
-    t = np.linspace(t0, t1, len(mjd1))
-
-    int_z1 = np.interp(t, mjd1, z1)
-    int_z2 = np.interp(t+dt, mjd2, z2)
-
-    denom = (T/ (T - dt)).to(u.dimensionless_unscaled)
-
-    return np.einsum("i...,i...->...", int_z1, int_z2) / denom
+        return np.einsum("i...,i...->...", int_z1, int_z2) / denom
 
 
 
-def get_arg(i, j, N):
-    return i*N + j - i*(i+1)//2
-    
-
-def grad_hess(corrs, a, beams, lam):
-
-    n = len(a)
-
-    grad = np.zeros_like(a)
-    hess = np.zeros(shape = (n, n))
-    I = np.ones_like(a)
+    def point_detector(self, gw_source: GWSource):
+        n_pul = len(self.pulsars)
+        pp = np.linspace(0, 2*np.pi, 100) * u.rad
+        c = np.empty_like(pp)
 
 
-    for i, rho in enumerate(beams):
+        if not np.isscalar(gw_source.frequency.value):
+            raise AttributeError("GW Source must contain only one point: center of the FoV")
 
-        rho_a = rho @ a
+        for i in range(n_pul):
+            for j in range(i, n_pul):
 
-        residual = (corrs[i] - a.T @ rho_a) 
+                c = self.observable_correlation(i, j,
+                                               pp/gw_source.frequency)
 
-        grad += -4 * residual*rho_a + 2*lam * I
-        hess += 8 * np.outer(rho_a, rho_a) - 4*residual*rho + 2*lam * np.eye(n)
+                idx = np.argmax(c)
+                arg = self._get_arg(i, j)
 
-    return grad, hess
+                self._phases[arg] = pp[idx]
+
+    def image_point(self, 
+                    grid: GWSource,
+                    lam: np.float64 = 1e0) -> np.ndarray:
+
+        n, k = grid.phi.shape
+
+        dphi = grid.phi[0, 1] - grid.phi[0, 0]
+        dtheta = grid.theta[1, 0] - grid.theta[0, 0]
+        theta_c = np.mean(theta)
+        dOmega = np.sin(theta_c) * dphi*dtheta
+
+        if n != k:
+            raise AttributeError("Please provide a square grid")
+
+        n_pul = len(self.pulsars)
+        n_pair = n_pul*(n_pul+1)//2
+
+        R = np.empty(shape = (n_pair, n*n))
+        c = np.empty(shape = (n_pair))
+
+        print("Calculationg point-like approximation")
+
+        for i in range(n_pul):
+            for j in range(i, n_pul):
+
+                print(f"\rBeam patterns found: {self._get_arg(i, j)+1} / {n_pul*(n_pul+1)//2}", end = "")
+
+                beam = pta.pair_beam_pattern(i, j, 
+                                             grid, 
+                                             phase_diff = self.phase(i, j))
+
+                corr = pta.observable_correlation(i, j,
+                                                  self.phase(i, j)/center.frequency)
+
+                arg = self._get_arg(i, j)
+
+                R[arg] = beam.ravel()
+                c[arg] = corr 
 
 
+        print("")
+        print("Inverting matrix R^T*R")
 
-def get_lin (corrs, a, beams, lam):
+        inv = R.T @ R  + lam*np.eye(n*n)
+        inv = sp.linalg.cho_factor(inv)
+        inv = sp.linalg.cho_solve(inv, np.eye(n*n))
 
-    n = len(a)
-    m = len(beams)
+        a = inv @ R.T @ c
+        a = a.reshape((n, n))
 
-    R = np.empty(shape = (m, n))
+        return np.abs(a)
 
-    for p in range(m):
-        for k in range(n):
-            R[p, k] = beams[p, k, k]
-    
-
-    RR = R.T @ R
-
-    return np.linalg.inv(RR + lam*np.eye(n)) @ R.T @ corrs
 
 
 
@@ -222,14 +241,14 @@ def get_lin (corrs, a, beams, lam):
 
 if __name__ == "__main__":
 
-    n = 50
-    i = 1
-    j = 2
+    n = 100
     center = [60, 30] * u.deg
+    n_pul = 60
 
-    width = [2e-1, 2e-1] * u.deg
 
+    width = [12, 12] * u.arcmin
     ones = np.ones(shape = (n, n))
+
 
 
     # make a grid of explored pixels
@@ -237,19 +256,12 @@ if __name__ == "__main__":
     theta = center[1] + np.linspace(-width[1]/2, width[1]/2, n)
 
     phi, theta = np.meshgrid(phi, theta)
-    phi_r = phi.ravel()
-    theta_r = theta.ravel()
 
-
-    grid = GWSource(theta = theta, 
-                      phi = phi,
-                      frequency = 1e-8 * u.Hz * ones,
-                      strain = ones)
-
-    grid_r = GWSource(theta = theta_r, 
-                      phi = phi_r,
-                      frequency = 1e-8 * u.Hz * np.ones(shape = (n*n, n*n)),
-                      strain = np.ones(shape = (n*n, n*n)))
+    grid = GWSource(theta = theta,
+                    phi = phi,
+                    frequency = 1e-8 * u.Hz,
+                    strain = 1
+                    )
 
     center = GWSource(theta = center[1], 
                       phi = center[0],
@@ -258,87 +270,36 @@ if __name__ == "__main__":
 
 
 
-
-    pulsars = Pulsar.load_collection("pulsars")
-    # psr1 = Pulsar(0*u.deg, 0*u.deg, 1*u.kpc)
-    # psr2 = Pulsar(90*u.deg, 0*u.deg, 1*u.kpc)
-    # pulsars = [psr1, psr2]
-
+    pulsars = Pulsar.load_collection("pulsars")[:n_pul]
     pta = PTACorrelationDetector(pulsars)
-    n_pul = len(pulsars) 
-    n_pul = 10
 
     # Find apropriate phases to poit the antenna
+    pta.point_detector(center)
 
-    delta_phi = np.empty(n_pul*(n_pul+1)//2) * u.rad 
-
-    pp = np.linspace(0, 2*np.pi, 100) * u.rad
-    c = np.empty_like(pp)
-
-    for i in range(n_pul):
-        for j in range(i, n_pul):
-
-            c = corr(pulsars[i],
-                       pulsars[j],
-                       pp/center.frequency)
-
-
-            idx = np.argmax(c)
-            arg = get_arg(i, j, n_pul)
-
-            delta_phi[arg] = pp[idx]
-
-    # prepare beam patterns for all pulsar pairs
-    beams = np.empty(shape = (n_pul*(n_pul+1)//2, n*n, n*n))
-    corrs = np.empty(shape = (n_pul*(n_pul+1)//2))
+    img = pta.image_point(grid, lam = 1e1)
     
 
+    plt.figure(figsize = (8/2.54, 8/2.54))
+    plt.title(f"$N = {n_pul}$")
+    plt.xlabel(r"arcmin")
+    plt.ylabel(r"arcmin")
+    plt.xticks([-6, -3, 0, 3, 6])
+    plt.yticks([-6, -3, 0, 3, 6])
 
-    for i in range(n_pul):
-        for j in range(i, n_pul):
-
-            arg = get_arg(i, j, n_pul)
-            print(f"{arg}/{n_pul*(n_pul+1)//2}")
-
-            beams[arg] = pta.pair_beam_pattern(i, j, 
-                                               grid_r, 
-                                               delta_phi[arg])
-            corrs[arg] = corr(pulsars[i],
-                              pulsars[j],
-                              delta_phi[arg]/center.frequency)
-
-
-    a = np.ones(shape = (n, n), dtype = np.float64)
-    a = a.ravel()
-
-    a = get_lin(corrs, a, beams, 1e-2)
-
-    plt.figure()
-    plt.imshow(a.reshape((n, n)),
+    plt.imshow(np.abs(img),
                origin = "lower",
                cmap = "hot",
+               extent = [-width[0].to(u.arcmin).value/2,
+                         width[0].to(u.arcmin).value/2,
+                         -width[1].to(u.arcmin).value/2,
+                         width[1].to(u.arcmin).value/2],
+               #vmin = 0, vmax = 1
                )
 
     #plt.plot(n/2, n/2, "*")
-    plt.colorbar()
+    #plt.colorbar()
 
-#    for i in range(10):
-#        print(i)
-#
-#        grad, hess = grad_hess(corrs, a, beams, 1)
-#        a = a - np.linalg.inv(hess) @ grad
-#
-#        plt.figure()
-#        plt.imshow(a.reshape((n, n)),
-#                   origin = "lower",
-#                   cmap = "hot")
-#        plt.plot(n/2, n/2, "*")
-#        plt.colorbar()
-
-
-
-
-    save_image("123.pdf")
+    save_image("123.pdf", tight = True)
 
 
 

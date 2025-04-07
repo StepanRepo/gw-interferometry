@@ -68,17 +68,24 @@ class GWSource:
             self.distance = (self.distance / const.c).to(u.yr)
 
 
-    def get_direction_vector(self) -> np.ndarray:
-        """Get unit vector in GW propagation direction.
 
-        Returns:
-            np.ndarray: 3D unit vector in Cartesian coordinates
-        """
-        return np.array([
-            np.sin(self.theta.value) * np.cos(self.phi.value),
-            np.sin(self.theta.value) * np.sin(self.phi.value),
-            np.cos(self.theta.value)
-        ])
+        m = np.array([np.sin(self.phi), -np.cos(self.phi), np.zeros(self.phi.shape)])
+        n = np.array([
+            np.cos(self.theta)*np.cos(self.phi),
+            np.cos(self.theta)*np.sin(self.phi),
+            -np.sin(self.theta)
+            ])
+
+        self.e_plus = np.einsum('i...,j...->ij...', m, m) - np.einsum('i...,j...->ij...', n, n)
+        self.e_cross = np.einsum('i...,j...->ij...', m, n) + np.einsum('i...,j...->ij...', n, m)
+
+        self.unit_vector  = np.array([
+            np.sin(self.theta) * np.cos(self.phi),
+            np.sin(self.theta) * np.sin(self.phi),
+            np.cos(self.theta)
+            ])
+
+
 
 class Pulsar:
     """A pulsar in the timing array.
@@ -181,11 +188,14 @@ class Pulsar:
             Array of MJD observation times
         """
         n_obs = int((duration / cadence).to(u.dimensionless_unscaled))
+
         self.mjd = start_mjd + np.arange(n_obs) * (cadence.to(u.day).value)
+        self.redshifts = np.zeros(n_obs, dtype = np.float64)
+
         return self.mjd
 
 
-    def calculate_redshift(self, gw_source: GWSource) -> np.ndarray:
+    def add_redshift(self, gw_source: GWSource) -> np.ndarray:
         """Calculate GW-induced redshift in pulsar signal.
 
         Args:
@@ -197,7 +207,7 @@ class Pulsar:
         t = self.mjd * u.day
 
         # GW propagation direction
-        gw_dir = gw_source.get_direction_vector()
+        gw_dir = gw_source.unit_vector
         p = self.get_unit_vector()
         mu = np.dot(gw_dir, p)
 
@@ -236,7 +246,7 @@ class Pulsar:
         redshift = delta_h_plus * F_plus + delta_h_cross * F_cross
 
         # Store results
-        self.redshifts = redshift
+        self.redshifts += redshift
 
         return redshift
 
@@ -368,7 +378,12 @@ if __name__ == '__main__':
     np.random.seed(42)
 
 
-    source = GWSource(theta = 30*u.deg, 
+    source1 = GWSource(theta = 30*u.deg,
+                      phi = 60*u.deg,
+                      frequency = 1e-8 * u.Hz,
+                      strain = 1)
+
+    source2 = GWSource(theta = 30*u.deg + 1*u.arcmin, 
                       phi = 60*u.deg,
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
@@ -377,10 +392,12 @@ if __name__ == '__main__':
 
     for psr in pulsars:
         psr.generate_observation_times()
-        psr.calculate_redshift(source)
+        psr.add_redshift(source1)
+        #psr.add_redshift(source2)
 
     Pulsar.save_collection(pulsars, "pulsars")
     pulsars = Pulsar.load_collection("pulsars")
+
 
 
 
