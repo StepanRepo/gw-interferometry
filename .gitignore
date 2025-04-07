@@ -4,6 +4,7 @@ pulsars
 venv
 *.pdf
 *.png
+*.dat
 
 # vim temporal files
 .*.swp
