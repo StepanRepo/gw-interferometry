@@ -9,6 +9,10 @@ A complete implementation of GW signal simulation in PTA data following:
 - Proper astropy units throughout
 - Realistic parameter ranges
 - Comprehensive docstrings
+
+This module provides classes to simulate gravitational wave sources and pulsars
+for pulsar timing array (PTA) analysis. It handles unit conversions automatically
+and includes functionality to save/load data to HDF5 files.
 """
 
 import numpy as np
@@ -30,18 +34,54 @@ set_tex()
 class GWSource:
     """A gravitational wave source for PTA simulations.
 
-    Attributes:
-        theta (u.Quantity): Polar angle of GW source [rad]
-        phi (u.Quantity): Azimuthal angle of GW source [rad]
-        frequency (u.Quantity): GW frequency [Hz]
-        strain (float): Characteristic strain amplitude (dimensionless)
-        distance (u.Quantity): Luminosity distance to source [Mpc]
-        inclination (u.Quantity): Inclination angle of binary orbit [rad]
-        phase (u.Quantity): Initial GW phase [rad]
+    This class represents a gravitational wave source with configurable parameters
+    including position, frequency, strain amplitude, and other physical properties.
+    It automatically handles unit conversions and calculates polarization tensors.
 
-    Example:
-        >>> gw = GWSource(theta=45*u.deg, phi=30*u.deg,
-        ...              frequency=8*u.nanohertz, strain=1e-14)
+    Parameters
+    ----------
+    theta : u.Quantity
+        Polar angle of GW source [rad]
+    phi : u.Quantity
+        Azimuthal angle of GW source [rad]
+    frequency : u.Quantity
+        GW frequency [Hz] or angular frequency [rad/s]
+    strain : float, optional
+        Characteristic strain amplitude (dimensionless), default=1
+    distance : u.Quantity, optional
+        Luminosity distance to source, default=100 Mpc
+    inclination : u.Quantity, optional
+        Inclination angle of binary orbit, default=0 rad
+    phase : u.Quantity, optional
+        Initial GW phase, default=0 rad
+
+    Attributes
+    ----------
+    theta : u.Quantity
+        Polar angle of GW source [rad]
+    phi : u.Quantity
+        Azimuthal angle of GW source [rad]
+    frequency : u.Quantity
+        Angular frequency of GW [rad/s]
+    strain : float
+        Characteristic strain amplitude (dimensionless)
+    distance : u.Quantity
+        Luminosity distance to source [yr]
+    inclination : u.Quantity
+        Inclination angle of binary orbit [rad]
+    phase : u.Quantity
+        Initial GW phase [rad]
+    e_plus : ndarray
+        Plus polarization tensor
+    e_cross : ndarray
+        Cross polarization tensor
+    unit_vector : ndarray
+        Unit vector pointing to GW source
+
+    Example
+    -------
+    >>> gw = GWSource(theta=45*u.deg, phi=30*u.deg,
+    ...              frequency=8*u.nanohertz, strain=1e-14)
     """
     theta: u.Quantity
     phi: u.Quantity
@@ -53,7 +93,12 @@ class GWSource:
 
 
     def __post_init__(self):
-        """Validate and convert units on initialization."""
+        """Validate and convert units on initialization.
+
+        Ensures all quantities have appropriate units and calculates
+        derived properties like polarization tensors.
+        """
+
         self.theta = self.theta.to(u.rad)
         self.phi = self.phi.to(u.rad)
         self.inclination = self.inclination.to(u.rad)
@@ -90,26 +135,51 @@ class GWSource:
 class Pulsar:
     """A pulsar in the timing array.
 
-    Attributes:
-        ra (u.Quantity): Right ascension [rad]
-        dec (u.Quantity): Declination [rad]
-        distance (u.Quantity): Distance to pulsar [kpc]
-        name (str): Pulsar identifier
-        psi (u.Quantity): Polarization angle [rad]
-        mjd (np.ndarray): Array of observation times
-        redshifts (np.ndarray): Induced redshift values
+    This class represents a pulsar with its astrometric parameters and timing data.
+    It includes methods to calculate GW-induced redshift, generate observation times,
+    and save/load data to/from HDF5 files.
+
+    Parameters
+    ----------
+    ra : u.Quantity
+        Right ascension [rad]
+    dec : u.Quantity
+        Declination [rad]
+    distance : u.Quantity
+        Distance to pulsar [kpc or yr]
+    name : str, optional
+        Pulsar identifier, default=""
+
+    Attributes
+    ----------
+    ra : u.Quantity
+        Right ascension [rad]
+    dec : u.Quantity
+        Declination [rad]
+    distance : u.Quantity
+        Distance to pulsar [yr]
+    name : str
+        Pulsar identifier
+    mjd : ndarray or None
+        Array of observation times
+    redshifts : ndarray or None
+        Induced redshift values
     """
 
     def __init__(self, ra: u.Quantity, dec: u.Quantity,
                  distance: u.Quantity, name: str = ""):
         """Initialize a pulsar with sky position and distance.
 
-        Args:
-            ra: Right ascension (0 to 2π rad)
-            dec: Declination (-π/2 to π/2 rad)
-            distance: Distance to pulsar [kpc]
-            name: Pulsar identifier (default "")
-            psi: Polarization angle (0 to π rad, random if None)
+        Parameters
+        ----------
+        ra : u.Quantity
+            Right ascension (0 to 2π rad)
+        dec : u.Quantity
+            Declination (-π/2 to π/2 rad)
+        distance : u.Quantity
+            Distance to pulsar [kpc or light-years]
+        name : str, optional
+            Pulsar identifier, default=""
         """
 
         self.ra = Angle(ra.to(u.rad))
@@ -126,7 +196,13 @@ class Pulsar:
             raise AttributeError("Wrong physical unit for distance")
     
     def _generate_default_name(self) -> str:
-        """Generate default name from coordinates."""
+        """Generate default name from coordinates.
+
+        Returns
+        -------
+        str
+            Pulsar name in J2000 format (e.g., J0534+2200)
+        """
 
         ra_hms = self.ra.to_string(unit = "hour", 
                                    sep = "", 
@@ -149,14 +225,21 @@ class Pulsar:
                       max_distance: u.Quantity = 5 * u.kpc) -> List['Pulsar']:
         """Generate pulsars with realistic Galactic distribution.
 
-        Args:
-            n: Number of pulsars to generate
-            min_distance: Minimum pulsar distance [kpc]
-            max_distance: Maximum pulsar distance [kpc]
+        Parameters
+        ----------
+        n : int, optional
+            Number of pulsars to generate, default=1
+        min_distance : u.Quantity, optional
+            Minimum pulsar distance, default=0.3 kpc
+        max_distance : u.Quantity, optional
+            Maximum pulsar distance, default=5 kpc
 
-        Returns:
-            List of Pulsar objects with random positions
+        Returns
+        -------
+        List[Pulsar]
+            List of randomly generated Pulsar objects
         """
+
         ra = 2 * np.pi * np.random.rand(n) * u.rad
         dec = np.arcsin(2 * np.random.rand(n) - 1) * u.rad
         distances = min_distance + (max_distance - min_distance) * np.random.rand(n)
@@ -169,9 +252,12 @@ class Pulsar:
     def get_unit_vector(self) -> np.ndarray:
         """Get unit vector pointing to pulsar.
 
-        Returns:
-            np.ndarray: 3D unit vector in Cartesian coordinates
+        Returns
+        -------
+        ndarray
+            3D unit vector in Cartesian coordinates
         """
+
         return np.array([
             np.cos(self.ra.value) * np.cos(self.dec.value),
             np.sin(self.ra.value) * np.cos(self.dec.value),
@@ -184,11 +270,25 @@ class Pulsar:
                                    cadence: u.Quantity = 14.0 * u.day) -> np.ndarray:
         """Generate realistic observation schedule.
 
-        Returns:
+        Parameters
+        ----------
+        start_mjd : float, optional
+            Starting Modified Julian Date, default=58000.0
+        duration : u.Quantity, optional
+            Total observation duration, default=10 yr
+        cadence : u.Quantity, optional
+            Time between observations, default=14 days
+
+        Returns
+        -------
+        ndarray
             Array of MJD observation times
         """
+
+        # Calculate number of observations based on duration and cadence
         n_obs = int((duration / cadence).to(u.dimensionless_unscaled))
 
+        # Generate evenly spaced observation times
         self.mjd = start_mjd + np.arange(n_obs) * (cadence.to(u.day).value)
         self.redshifts = np.zeros(n_obs, dtype = np.float64)
 
@@ -198,12 +298,20 @@ class Pulsar:
     def add_redshift(self, gw_source: GWSource) -> np.ndarray:
         """Calculate GW-induced redshift in pulsar signal.
 
-        Args:
-            gw_source: GW source parameters
+        Implements the Anholm et al. (2009) formalism for calculating
+        the redshift induced by a gravitational wave.
 
-        Returns:
+        Parameters
+        ----------
+        gw_source : GWSource
+            GW source parameters
+
+        Returns
+        -------
+        ndarray
             Array of redshift values at each observation time
         """
+
         t = self.mjd * u.day
 
         # GW propagation direction
@@ -245,17 +353,20 @@ class Pulsar:
         # Redshift calculation
         redshift = delta_h_plus * F_plus + delta_h_cross * F_cross
 
-        # Store results
+        # Add to existing redshifts (allows multiple sources)
         self.redshifts += redshift
 
         return redshift
 
     def save_to_file(self, filename: str):
         """Save pulsar data to individual HDF5 file.
-        
-        Args:
-            filename: Output file path (.h5 recommended)
+
+        Parameters
+        ----------
+        filename : str
+            Output file path (.h5 recommended)
         """
+
         with h5py.File(filename, 'w') as f:
             # Store astrometric parameters
             f.attrs['ra'] = self.ra.value
@@ -275,13 +386,19 @@ class Pulsar:
     @classmethod
     def load_from_file(cls, filename: str) -> 'Pulsar':
         """Load pulsar from individual HDF5 file.
+
+        Parameters
+        ----------
+        filename : str
+            Input file path
+
+        Returns
+        -------
         
-        Args:
-            filename: Input file path
-            
-        Returns:
+        Pulsar
             Reconstructed Pulsar object
         """
+
         with h5py.File(filename, 'r') as f:
             # Reconstruct with proper units
             pulsar = cls(
@@ -302,11 +419,17 @@ class Pulsar:
     @classmethod
     def save_collection(cls, pulsars: List['Pulsar'], directory: str):
         """Save multiple pulsars to individual files in a directory.
-        
-        Args:
-            pulsars: List of Pulsar objects
-            directory: Target directory path
+
+        Parameters
+        ----------
+
+        pulsars: List[Pulsar]
+            List of Pulsar objects
+        directory: str
+            Target directory path
         """
+
+
         Path(directory).mkdir(parents=True, exist_ok=True)
 
         for pulsar in pulsars:
@@ -315,13 +438,20 @@ class Pulsar:
     @classmethod
     def load_collection(cls, directory: str) -> List['Pulsar']:
         """Load multiple pulsars from a directory of files.
+
+        Parameters
+        ----------
+        directory: str
+            Source directory path
+
+        Returns
+        -------
         
-        Args:
-            directory: Source directory path
-            
-        Returns:
+        List[Pulsar]
             List of reconstructed Pulsar objects
         """
+
+
         pulsars = []
         for filepath in Path(directory).glob('*.h5'):
             pulsars.append(cls.load_from_file(str(filepath)))
@@ -330,9 +460,16 @@ class Pulsar:
 
 
     def __str__(self) -> str:
-        """Return formatted string representation with c=1 units."""
-        # Coordinate conversion
+        """Return formatted string representation of the class.
 
+        Returns
+        -------
+        
+        str
+            Formatted string with the class' parameters
+        """
+
+        # Coordinate conversion
         ra_hms = self.ra.to_string(unit = "hour", 
                                    sep = ":", 
                                    decimal = False, 
@@ -378,25 +515,30 @@ if __name__ == '__main__':
     np.random.seed(42)
 
 
+    # Define a GW source
     source1 = GWSource(theta = 30*u.deg,
                       phi = 60*u.deg,
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
 
-    source2 = GWSource(theta = 30*u.deg + 1*u.arcmin, 
-                      phi = 60*u.deg,
+
+    # Define a second GW source to add it to the observations
+    source2 = GWSource(theta = 30*u.deg,
+                      phi = 60*u.deg + 3*u.arcmin, 
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
 
+    # Generate a set of 60 pulsars
     pulsars = Pulsar.generate_random(60)
 
+    # Add influence of defined sources to the set of pulsars
     for psr in pulsars:
         psr.generate_observation_times()
         psr.add_redshift(source1)
         #psr.add_redshift(source2)
 
+    # Save simulated data 
     Pulsar.save_collection(pulsars, "pulsars")
-    pulsars = Pulsar.load_collection("pulsars")
 
 
 
