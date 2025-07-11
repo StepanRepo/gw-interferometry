@@ -523,8 +523,8 @@ if __name__ == '__main__':
 
 
     # Define a second GW source to add it to the observations
-    source2 = GWSource(theta = 30*u.deg,
-                      phi = 60*u.deg + 3*u.arcmin, 
+    source2 = GWSource(theta = 30*u.deg + 1*u.arcmin,
+                      phi = 60*u.deg + 2*u.arcmin, 
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
 
