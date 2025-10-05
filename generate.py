@@ -188,6 +188,9 @@ class Pulsar:
         self.mjd = None
         self.redshifts = None
 
+        self.phi = self.ra
+        self.theta = np.pi/2*u.rad - self.dec
+
         if distance.unit.physical_type == "time":
             self.distance = distance.to(u.yr)
         elif distance.unit.physical_type == "length":
@@ -357,6 +360,11 @@ class Pulsar:
         self.redshifts += redshift
 
         return redshift
+    
+    def add_noise(self, 
+                  sigma: float):
+
+        self.redshifts += np.random.normal(0, sigma, len(self.redshifts))
 
     def save_to_file(self, filename: str):
         """Save pulsar data to individual HDF5 file.
@@ -516,15 +524,20 @@ if __name__ == '__main__':
 
 
     # Define a GW source
-    source1 = GWSource(theta = 30*u.deg,
-                      phi = 60*u.deg,
+    source1 = GWSource(theta = 30*u.deg + 1*u.arcmin,
+                      phi = 60*u.deg - 3*u.arcmin,
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
 
 
     # Define a second GW source to add it to the observations
-    source2 = GWSource(theta = 30*u.deg + 1*u.arcmin,
-                      phi = 60*u.deg + 2*u.arcmin, 
+    source2 = GWSource(theta = 30*u.deg + 0*u.arcmin,
+                      phi = 60*u.deg + 1*u.arcmin, 
+                      frequency = 1e-8 * u.Hz,
+                      strain = 1)
+
+    source3 = GWSource(theta = 30*u.deg - 1*u.arcmin,
+                      phi = 60*u.deg - 1*u.arcmin, 
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
 
@@ -534,8 +547,11 @@ if __name__ == '__main__':
     # Add influence of defined sources to the set of pulsars
     for psr in pulsars:
         psr.generate_observation_times()
+
         psr.add_redshift(source1)
-        #psr.add_redshift(source2)
+        psr.add_redshift(source2)
+        psr.add_redshift(source3)
+
 
     # Save simulated data 
     Pulsar.save_collection(pulsars, "pulsars")
