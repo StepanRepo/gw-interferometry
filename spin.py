@@ -5,6 +5,8 @@ import numpy as np
 from scipy.special import loggamma as lgm, logsumexp
 from alp_integral import logI2
 
+from scipy.special import assoc_legendre_p
+
 #import matplotlib.pyplot as plt
 #from matplotlib.transforms import Affine2D
 
@@ -215,11 +217,9 @@ def intY2Y(l, m, l1):
     ])
 
 
-    print(E_terms)
     E_terms = E_terms[E_terms[:, 1] != 0.0]
     logE = E_terms[:, 0]
     signs = E_terms[:, 1]
-    print(np.exp(logE)*signs)
 
 
     if len(logE) == 0:
@@ -232,15 +232,54 @@ def intY2Y(l, m, l1):
 
     return sign * np.exp(summ)
 
+def F(l):
+    return 4*np.pi * (-1)**l / np.sqrt((l + 2)*(l + 1)*l*(l - 1))
+
+def N(l):
+    logN_l = .5 * (lgm(l-1) - lgm(l+3))
+    return np.exp(logN_l)
+
+def K(l, m):
+    logK = .5 * np.log((2*l + 1)/(4*np.pi)) + \
+            .5 * (lgm(l - m + 1) - lgm(l + m +1))
+    return np.exp(logK)
+
+def Y(l, m, theta, phi):
+    leg = assoc_legendre_p(m, n, np.cos(theta)) 
+    k = K(l, m)
+
+    return k * leg * np.exp(1j*m * phi)
+
+
+def p_inv_factor(l, m):
+    log_fac = lgm(l - m + 1) - lgm(l + m + 1)
+    return (-1)**m * np.exp(log_fac)
+
+
+
+def E(l, m):
+
+    for l1 in range(np.abs(m), np.abs(m) + 5):
+
+        E_terms = np.array([
+            E1p(l, m, l1), 
+            E2p(l, m, l1), 
+            E3p(l, m, l1), 
+            E4p(l, m, l1),
+            E5p(l, m, l1), 
+            E6p(l, m, l1), 
+            E7p(l, m, l1),
+            E1m(l, m, l1), 
+            E2m(l, m, l1), 
+            E3m(l, m, l1),
+            E4m(l, m, l1), 
+            E5m(l, m, l1), 
+            E6m(l, m, l1)
+        ])
+
 
 if __name__ == "__main__":
-
-    l1 = 5
-    l = 5
-    m = 2
-    analytica = intY2Y(l, m, l1)
-
-    print(f"Re analytica = {analytica}")
+    #E(3, 3)
 
 
 

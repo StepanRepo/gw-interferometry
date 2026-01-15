@@ -520,7 +520,7 @@ class Pulsar:
 # Example usage with realistic values
 if __name__ == '__main__':
 
-    np.random.seed(42)
+    #np.random.seed(42)
 
 
     # Define a GW source
@@ -531,15 +531,15 @@ if __name__ == '__main__':
 
 
     # Define a second GW source to add it to the observations
-    source2 = GWSource(theta = 30*u.deg + 0*u.arcmin,
+    source2 = GWSource(theta = 30*u.deg + 1*u.arcmin,
                       phi = 60*u.deg + 1*u.arcmin, 
                       frequency = 1e-8 * u.Hz,
-                      strain = 1)
+                      strain = .5)
 
     source3 = GWSource(theta = 30*u.deg - 1*u.arcmin,
                       phi = 60*u.deg - 1*u.arcmin, 
                       frequency = 1e-8 * u.Hz,
-                      strain = 1)
+                      strain = .5)
 
     # Generate a set of 60 pulsars
     pulsars = Pulsar.generate_random(60)
@@ -551,10 +551,17 @@ if __name__ == '__main__':
         psr.add_redshift(source1)
         psr.add_redshift(source2)
         psr.add_redshift(source3)
+        
+        #psr.redshifts += np.random.normal(0, .1, len(psr.redshifts))
+
+        #plt.figure()
+        #plt.title(psr.name)
+        #plt.plot(psr.redshifts)
 
 
     # Save simulated data 
     Pulsar.save_collection(pulsars, "pulsars")
+    save_image("pulsars.pdf", tight = True)
 
 
 

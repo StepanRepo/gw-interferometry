@@ -1,4 +1,4 @@
-#! /bin/python
+#! venv/bin/python
 
 """
 Gravitational Wave Pulsar Timing Array Correlation Detector
@@ -20,18 +20,20 @@ from typing import List, Union, Tuple
 from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
+
 from generate import Pulsar, GWSource
 from pathlib import Path
 
 from scipy.optimize import curve_fit
 from scipy.ndimage import gaussian_filter
 from scipy.signal import convolve2d
+from scipy import linalg
 
 import copy
 
 from myplot import *
 set_tex()
-
 
 class PTACorrelationDetector:
     """A detector that calculates correlation patterns between pulsars in a PTA.
@@ -509,7 +511,7 @@ class PTACorrelationDetector:
 
         #inv = 1/np.sum(R*R, axis = 0)
         #asq = (R.T @ self.correlations) * inv 
-        inv = np.linalg.inv(R.T @ R + 1e1 * np.eye(n*n))
+        inv = np.linalg.inv(R.T @ R + 1e0 * np.eye(n*n))
         asq = inv @ R.T @ self.correlations
 
         a = np.sqrt(np.abs(asq)).reshape((n, n))
@@ -555,18 +557,19 @@ class PTACorrelationDetector:
             img[argmax] += amplitude
 
 
-            plt.figure(figsize = (4, 4)) # view format 
+            #plt.figure(figsize = (4, 4)) # view format 
+            plt.figure(figsize = a4(.6, .6/np.sqrt(2))) # view format 
 
-            plt.title(f"Dirty Image i = {i}")
-            plt.xlabel(r"arcmin")
-            plt.ylabel(r"arcmin")
+            plt.title(f"Dirty Map {i}")
+            plt.xlabel(r"pix")
+            plt.ylabel(r"pix")
 
             plt.imshow(DI,
                        origin = "lower",
                        cmap = "hot",
                        )
-            plt.colorbar()
-            plt.plot(argmax[1], argmax[0], "ko")
+            #plt.colorbar()
+            #plt.plot(argmax[1], argmax[0], "ko")
 
 
             # Remove the point from observations
@@ -584,6 +587,62 @@ class PTACorrelationDetector:
 
 
 
+    def image_svd(self, 
+                   grid: GWSource,
+                   lam: np.float64 = 1e-1,
+                   ) -> np.ndarray:
+
+        n, k = grid.phi.shape
+
+        if n != k:
+            raise AttributeError("Please provide a square grid")
+
+        n_pul = len(self.pulsars)
+        n_pair = n_pul*(n_pul+1)//2
+
+
+
+        # Calculate pixel sizes in the grid
+        #dphi = grid.phi[0, 1] - grid.phi[0, 0]
+        #dtheta = grid.theta[1, 0] - grid.theta[0, 0]
+        #solid_angle = np.sin(grid.theta) * dtheta * dphi
+        #solid_angle = solid_angle.to_value(u.rad**2)
+
+
+        # Initialize matrices for the linear system
+        self.fill_beams(grid)
+        self.fill_correlations()
+
+        n = grid.phi.shape[0]
+
+        R = self.pair_beams.reshape((n_pair, -1))
+        U, S, Vh = linalg.svd(R)
+
+        rho = self.correlations
+        img = np.zeros((n, n))
+
+
+        for i in range(8*len(self.pulsars)):
+
+            new = np.dot(U[:, i], rho) * Vh[i, :] / S[i]
+            new = new.reshape((n, n))
+            img += new
+
+        fig, ax = plt.subplots(1, 2)
+        fig.suptitle(f"{S[i]}")
+        ax[0].imshow(new, origin = "lower", cmap = "hot")
+        ax[1].imshow(img, origin = "lower", cmap = "hot")
+
+        print(S[0])
+        print(S[2*len(self.pulsars)])
+
+
+
+
+
+
+        save_image("123.pdf", tight = True)
+        exit()
 
 
 
@@ -699,7 +758,6 @@ if __name__ == "__main__":
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
 
-    phase_grid = np.linspace(0, np.pi, 10) * u.rad
 
 
 
@@ -707,24 +765,25 @@ if __name__ == "__main__":
     pulsars = Pulsar.load_collection("pulsars")[:n_pul]
     pta = PTACorrelationDetector(pulsars)
 
-    # Find optimal phases to poit the antenna
-    #pta.point_detector(center)
-
+    #img = pta.image_svd(grid)
 
     # Reconstruct the sky image
     #img = pta.image_point(grid, refine_beams = True)
     dirty_beam, psf = pta.image_psf(grid, crop = 15)
-    img = pta.image_clean(grid, gain = 1, n_iter = 16)
+    img = pta.image_clean(grid, gain = 3e-1, n_iter = 30)
     img = convolve2d(img, psf, mode = "same") / np.max(psf)
 
 
 
 
-    plt.figure(figsize = (4, 4)) # view format 
+    #plt.figure(figsize = (4, 4)) # view format 
+    plt.figure(figsize = a4(.6, .6/np.sqrt(2))) # view format 
 
-    plt.title(f"Image for $N = {n_pul}$")
+    plt.title(f"Clean Map $N = {n_pul}$")
     plt.xlabel(r"arcmin")
     plt.ylabel(r"arcmin")
+    plt.gca().xaxis.set_major_formatter(FormatStrFormatter('$%.0f$'))
+    plt.gca().yaxis.set_major_formatter(FormatStrFormatter('$%.0f$'))
 
     extent = [-width[0].to(u.arcmin).value/2,
               width[0].to(u.arcmin).value/2,
@@ -736,7 +795,7 @@ if __name__ == "__main__":
                cmap = "hot",
                extent = extent,
                )
-    plt.colorbar()
+    #plt.colorbar()
 
 
 #    # Plot PSF
@@ -751,7 +810,8 @@ if __name__ == "__main__":
 #                ) 
 
 
-    save_image("pta_image.pdf")
+    #save_eps("pta_image", tight = True)
+    save_image("pta_image.pdf", tight = True)
 
 
 
