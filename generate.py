@@ -524,22 +524,27 @@ if __name__ == '__main__':
 
 
     # Define a GW source
-    source1 = GWSource(theta = 30*u.deg + 1*u.arcmin,
-                      phi = 60*u.deg - 3*u.arcmin,
+    source1 = GWSource(theta = 30*u.deg + 2*u.arcmin,
+                      phi = 60*u.deg - 2*u.arcmin,
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
 
 
     # Define a second GW source to add it to the observations
-    source2 = GWSource(theta = 30*u.deg + 1*u.arcmin,
-                      phi = 60*u.deg + 1*u.arcmin, 
+    source2 = GWSource(theta = 30*u.deg + 2*u.arcmin,
+                      phi = 60*u.deg + 2*u.arcmin, 
                       frequency = 1e-8 * u.Hz,
-                      strain = .5)
+                      strain = 1)
 
-    source3 = GWSource(theta = 30*u.deg - 1*u.arcmin,
-                      phi = 60*u.deg - 1*u.arcmin, 
+    source3 = GWSource(theta = 30*u.deg - 2*u.arcmin,
+                      phi = 60*u.deg - 2*u.arcmin, 
                       frequency = 1e-8 * u.Hz,
-                      strain = .5)
+                      strain = 1)
+
+    source4 = GWSource(theta = 30*u.deg - 2*u.arcmin,
+                      phi = 60*u.deg + 2*u.arcmin, 
+                      frequency = 1e-8 * u.Hz,
+                      strain = 1)
 
     # Generate a set of 60 pulsars
     pulsars = Pulsar.generate_random(60)
@@ -551,6 +556,7 @@ if __name__ == '__main__':
         psr.add_redshift(source1)
         psr.add_redshift(source2)
         psr.add_redshift(source3)
+        #psr.add_redshift(source4)
         
         #psr.redshifts += np.random.normal(0, .1, len(psr.redshifts))
 

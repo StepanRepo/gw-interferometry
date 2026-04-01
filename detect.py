@@ -33,7 +33,6 @@ from scipy import linalg
 import copy
 
 from myplot import *
-set_tex()
 
 class PTACorrelationDetector:
     """A detector that calculates correlation patterns between pulsars in a PTA.
@@ -69,6 +68,8 @@ class PTACorrelationDetector:
         self.sinle_beams = None
         self.pair_beams = None
         self.correlations = None
+        self.svd = None
+
 
 
 
@@ -80,10 +81,10 @@ class PTACorrelationDetector:
                          gw_source2: GWSource = None,
                          phase_diff: u.Quantity = None) -> Union[float, np.ndarray]:
         """Calculate the correlation beam pattern ρ(Ω₁, Ω₂) for a pulsar pair.
-        
-        This implements calculating the response of a pulsar pair to GW sources at 
+
+        This implements calculating the response of a pulsar pair to GW sources at
         given sky positions, following equation (2.31) from the paper.
-        
+
         Parameters
         ----------
         i, j : int
@@ -94,7 +95,7 @@ class PTACorrelationDetector:
             Phase difference Δφ between pulsars in radians
         gw_source2 : GWSource, optional
             Second GW source parameters (direction Ω₂). If None, uses gw_source1.
-                
+
         Returns
         -------
         Union[float, np.ndarray]
@@ -102,67 +103,67 @@ class PTACorrelationDetector:
         """
         # Use gw_source1 for both if gw_source2 is not provided
         gw_source2 = gw_source1 if gw_source2 is None else gw_source2
-        
+
         # Convert inputs to numpy arrays
         theta1 = np.asarray(gw_source1.theta.to(u.rad).value, dtype=np.float64)
         phi1 = np.asarray(gw_source1.phi.to(u.rad).value, dtype=np.float64)
         theta2 = np.asarray(gw_source2.theta.to(u.rad).value, dtype=np.float64)
         phi2 = np.asarray(gw_source2.phi.to(u.rad).value, dtype=np.float64)
-        
+
         # Angular frequency of GW and phase difference between pulsars
         omega = gw_source1.frequency.to(u.rad/u.s).value
         if phase_diff is None:
             phase_diff = self.phase(i, j)
         delta_phi = phase_diff.to(u.rad).value
-        
+
         # Get the two pulsars
         p1 = self.pulsars[i]
         p2 = self.pulsars[j]
-        
+
         # Get unit vectors
         p1_vec = p1.get_unit_vector()
         p2_vec = p2.get_unit_vector()
-        
+
         # Calculate antenna pattern components for both sources
         F1_plus, F1_cross = self._calculate_antenna_components(gw_source1, p1_vec)
         F2_plus, F2_cross = self._calculate_antenna_components(gw_source2, p2_vec)
-        
+
         # Calculate distance terms ℓ (in seconds)
         omega_dir1 = gw_source1.unit_vector
         omega_dir2 = gw_source2.unit_vector
-        
+
         dot1 = np.einsum('i,i...->...', p1_vec, omega_dir1)  # p1·Ω₁
         dot2 = np.einsum('i,i...->...', p2_vec, omega_dir2)  # p2·Ω₂
-        
+
         ell1 = p1.distance.to(u.s).value * (1 + dot1)
         ell2 = p2.distance.to(u.s).value * (1 + dot2)
-        
+
         # Calculate the static component S (equation 2.18)
         sin_term1 = np.sin(omega * ell1 / 2)
         sin_term2 = np.sin(omega * ell2 / 2)
         S = 2 * sin_term1 * sin_term2
-        
+
         # Duration of the experiment
         #T = (p1.mjd.max() - p1.mjd.min())  # in days
         #delta_t = delta_phi / omega / 86400  # convert phase diff to days
         #S *= (T - delta_t)
-        
+
         # Combine antenna patterns (equations 2.19-2.20)
         FF_plus = F1_plus * F2_plus + F1_cross * F2_cross  # F1+F2+ + F1×F2×
         FF_cross = F1_plus * F2_cross - F1_cross * F2_plus  # F1+F2× - F1×F2+
-        
+
         # Calculate the angle difference term
         angle_diff = omega * (ell1 - ell2) / 2
-        
+
         # Calculate the dynamical components D1 and D2 (equation 2.21)
-        D1 = (np.cos(angle_diff) * FF_plus + 
+        D1 = (np.cos(angle_diff) * FF_plus +
               np.sin(angle_diff) * FF_cross)
-        D2 = (np.cos(angle_diff) * FF_cross - 
+        D2 = (np.cos(angle_diff) * FF_cross -
               np.sin(angle_diff) * FF_plus)
-        
+
         # Final correlation (equation 2.17)
         beam = S * (np.cos(delta_phi) * D1 + np.sin(delta_phi) * D2)
-        
+
         return beam
 
     def single_beam_pattern(self,
@@ -170,10 +171,10 @@ class PTACorrelationDetector:
                          grid: GWSource) -> Union[float, np.ndarray]:
 
         """Calculate the correlation beam pattern ρ(Ω₁, Ω₂) for a pulsar pair.
-        
-        This implements calculating the response of a pulsar pair to GW sources at 
+
+        This implements calculating the response of a pulsar pair to GW sources at
         given sky positions, following equation (2.31) from the paper.
-        
+
         Parameters
         ----------
         i, j : int
@@ -182,44 +183,44 @@ class PTACorrelationDetector:
             First GW source parameters (direction Ω₁)
         phase_diff : astropy.Quantity, optional
             Phase difference Δφ between pulsars in radians
-                
+
         Returns
         -------
         Union[float, np.ndarray]
             Correlation value(s) ρ(Ω₁, Ω₂) for the given pulsar pair
         """
-        
+
         # Convert inputs to numpy arrays
         theta = np.asarray(grid.theta.to(u.rad).value, dtype=np.float64)
         phi = np.asarray(grid.phi.to(u.rad).value, dtype=np.float64)
-        
+
         # Angular frequency of GW and phase difference between pulsars
         omega = grid.frequency.to(u.rad/u.s).value
-        
+
         # Get the two pulsars
         p = self.pulsars[i]
-        
+
         # Get unit vectors
         p_vec = p.get_unit_vector()
-        
+
         # Calculate antenna pattern components for both sources
         F_plus, F_cross = self._calculate_antenna_components(grid, p_vec)
         F = F_plus - 1j*F_cross
-        
+
         # Calculate distance terms ℓ (in seconds)
         omega_dir = grid.unit_vector
-        
+
         dot = np.einsum('i,i...->...', p_vec, omega_dir)  # p1·Ω₁
         ell = p.distance.to(u.s).value * (1 + dot)
-        
+
         # Calculate the static component S (equation 2.18)
         sin_term = np.sin(omega * ell / 2)
         exp_term = np.exp(-1j * omega*ell/2)
-        
-        
+
+
         # Final correlation (equation 2.17)
         beam = np.sqrt(2) * sin_term  * exp_term * F
-        
+
         return beam
 
 
@@ -227,14 +228,14 @@ class PTACorrelationDetector:
                                       gw_source: GWSource,
                                       p_vec: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Calculate the antenna pattern components F+ and F× for a pulsar.
-        
+
         Parameters
         ----------
         gw_source : GWSource
             GW source parameters including direction and polarization
         p_vec : np.ndarray
             Unit vector pointing to the pulsar
-            
+
         Returns
         -------
         Tuple[np.ndarray, np.ndarray]
@@ -255,8 +256,8 @@ class PTACorrelationDetector:
 
         return F_plus, F_cross
 
-    def _get_arg(self, 
-                 i: int, 
+    def _get_arg(self,
+                 i: int,
                  j: int) -> int:
         """Calculate the linearized index in the _phases array for pulsar pair (i,j).
 
@@ -317,7 +318,7 @@ class PTACorrelationDetector:
         ----------
         i, j : int
             Indices of the pulsar pair
-        dt : astropy.Quantity 
+        dt : astropy.Quantity
             The time lags for correlation calculation
 
         Returns
@@ -359,21 +360,21 @@ class PTACorrelationDetector:
         return np.einsum("i...,i...->...", int_z1, int_z2) * denom
 
 
-    def point_detector(self, 
-                       gw_source: GWSource, 
+    def point_detector(self,
+                       gw_source: GWSource,
                        n_phases: int = 100) -> None:
         """Determine optimal phase differences for maximum response to a GW source.
-        
+
         This method finds the phase differences that maximize the correlation response
         to a GW source at a given position using a quadratic optimization
-        
+
         Parameters
         ----------
         gw_source : GWSource
             The target GW source to point at (must be a single point)
         n_phases : int, optional
             Number of phase test points (default: 100)
-            
+
         Raises
         ------
         AttributeError
@@ -384,7 +385,7 @@ class PTACorrelationDetector:
             raise AttributeError("GW Source must contain only one point: center of the FoV")
         if gw_source.frequency.value <= 0:
             raise AttributeError("GW Source frequency must be positive")
-        
+
         n_pul = len(self.pulsars)
         optimal_phases = np.zeros(n_pul*(n_pul+1)//2) * u.rad
 
@@ -394,13 +395,13 @@ class PTACorrelationDetector:
         for i in range(n_pul):
             for j in range(i, n_pul):
 
-                D1 = self.pair_beam_pattern(i, j, 
-                                            gw_source, 
+                D1 = self.pair_beam_pattern(i, j,
+                                            gw_source,
                                             phase_diff = 0 * u.rad)
-                D2 = self.pair_beam_pattern(i, j, gw_source, 
+                D2 = self.pair_beam_pattern(i, j, gw_source,
                                             phase_diff = np.pi/2 * u.rad)
 
-                dphi = np.arctan(D2/D1) 
+                dphi = np.arctan(D2/D1)
                 dphi = np.mod(dphi, 2*np.pi)
                 dphi = dphi * u.rad
 
@@ -426,6 +427,7 @@ class PTACorrelationDetector:
         n_pul = len(self.pulsars)
         n_pair = n_pul*(n_pul+1)//2
 
+
         # Initialize matrices for the linear system
         B = np.empty(shape = (n_pair, n, n))
         c = np.empty(shape = (n_pair))
@@ -444,11 +446,11 @@ class PTACorrelationDetector:
 
                 print(f"\rBeam patterns found: {arg+1} / {n_pair}", end = "")
 
-                self.pair_beams[arg] = (self.single_beams[i] * self.single_beams[j].conj()).real 
+                self.pair_beams[arg] = (self.single_beams[i] * self.single_beams[j].conj()).real
 
 
         print("")
-        
+
     def fill_correlations(self):
 
         n_pul = len(self.pulsars)
@@ -467,12 +469,12 @@ class PTACorrelationDetector:
         print("")
 
 
-    def image_point(self, 
+    def image_point1(self,
                     grid: GWSource,
                     refine_beams: bool = True) -> np.ndarray:
         """Reconstruct a sky image of GW sources using the PTA data.
 
-        This implements the imaging method in the point-like source 
+        This implements the imaging method in the point-like source
 
         Parameters
         ----------
@@ -509,24 +511,25 @@ class PTACorrelationDetector:
         self.fill_correlations()
         R = self.pair_beams.reshape((n_pair, -1))
 
+
         #inv = 1/np.sum(R*R, axis = 0)
-        #asq = (R.T @ self.correlations) * inv 
+        #asq = (R.T @ self.correlations) * inv
         inv = np.linalg.inv(R.T @ R + 1e0 * np.eye(n*n))
         asq = inv @ R.T @ self.correlations
 
         a = np.sqrt(np.abs(asq)).reshape((n, n))
 
-        return a 
+        return a
 
 
 
-    def image_clean(self, 
+    def image_clean(self,
                    grid: GWSource,
                    gain: np.float64 = 1e-1,
                    n_iter: int = 50,
                    ) -> np.ndarray:
 
-        
+
         phi = grid.phi
         theta = grid.theta
         omega = grid.frequency
@@ -534,8 +537,8 @@ class PTACorrelationDetector:
         n_pul = len(self.pulsars)
         n_pair = n_pul * (n_pul + 1) // 2
 
-        
-        
+
+
         # Precompute correlations
         pta = copy.deepcopy(self)
 
@@ -556,9 +559,12 @@ class PTACorrelationDetector:
             # Save this point
             img[argmax] += amplitude
 
+            np.save(f"maps/dirty{i}", DI)
+            np.save(f"maps/clean{i}", img)
 
-            #plt.figure(figsize = (4, 4)) # view format 
-            plt.figure(figsize = a4(.6, .6/np.sqrt(2))) # view format 
+
+            plt.figure(figsize = (4, 4)) # view format
+            #plt.figure(figsize = a4(.6, .6/np.sqrt(2))) # paper format
 
             plt.title(f"Dirty Map {i}")
             plt.xlabel(r"pix")
@@ -568,7 +574,7 @@ class PTACorrelationDetector:
                        origin = "lower",
                        cmap = "hot",
                        )
-            #plt.colorbar()
+            plt.colorbar()
             #plt.plot(argmax[1], argmax[0], "ko")
 
 
@@ -587,10 +593,9 @@ class PTACorrelationDetector:
 
 
 
-    def image_svd(self, 
-                   grid: GWSource,
-                   lam: np.float64 = 1e-1,
-                   ) -> np.ndarray:
+    def image_point(self,
+                    grid: GWSource,
+                    refine_beams: bool = True) -> np.ndarray:
 
         n, k = grid.phi.shape
 
@@ -601,6 +606,13 @@ class PTACorrelationDetector:
         n_pair = n_pul*(n_pul+1)//2
 
 
+        # Initialize matrices for the linear system
+        if refine_beams or self.pair_beams is None:
+            self.fill_beams(grid)
+            R = self.pair_beams.reshape((n_pair, -1))
+            U, S, Vh = linalg.svd(R, full_matrices = False)
+
+            self.svd = U, S, Vh
 
         # Calculate pixel sizes in the grid
         #dphi = grid.phi[0, 1] - grid.phi[0, 0]
@@ -608,46 +620,30 @@ class PTACorrelationDetector:
         #solid_angle = np.sin(grid.theta) * dtheta * dphi
         #solid_angle = solid_angle.to_value(u.rad**2)
 
+        self.fill_correlations()
+        rho = self.correlations
 
         # Initialize matrices for the linear system
-        self.fill_beams(grid)
-        self.fill_correlations()
-
         n = grid.phi.shape[0]
-
-        R = self.pair_beams.reshape((n_pair, -1))
-        U, S, Vh = linalg.svd(R)
-
-        rho = self.correlations
-        img = np.zeros((n, n))
+        U, S, Vh = self.svd
 
 
-        for i in range(8*len(self.pulsars)):
+        #bad = (S/S[0] < 1e-2)
+        # k = np.argmax(bad)
+        # if (k == 0): k = len(S)
+        k = 2*len(self.pulsars)
 
-            new = np.dot(U[:, i], rho) * Vh[i, :] / S[i]
-            new = new.reshape((n, n))
-            img += new
+        img = ((U.T @ rho)[:k] / S[:k]) @ Vh[:k, :]
+        img = np.sqrt(np.abs(img))
 
-        fig, ax = plt.subplots(1, 2)
-        fig.suptitle(f"{S[i]}")
-        ax[0].imshow(new, origin = "lower", cmap = "hot")
-        ax[1].imshow(img, origin = "lower", cmap = "hot")
-
-        print(S[0])
-        print(S[2*len(self.pulsars)])
+        return img.reshape((n, n))
 
 
 
 
 
 
-        save_image("123.pdf", tight = True)
-        exit()
-
-
-
-
-    def image_psf(self, 
+    def image_psf(self,
                   grid: GWSource,
                   crop: int = None,
                   ) -> (np.ndarray, np.ndarray):
@@ -679,14 +675,14 @@ class PTACorrelationDetector:
                           frequency = omega,
                           strain = 1)
 
-        pulsars = Pulsar.load_collection("pulsars")
+        pulsarsnew = self.pulsars.copy()
 
-        for i, psr in enumerate(pulsars):
+        for i, psr in enumerate(pulsarsnew):
             psr.redshifts[:] = 0.0
             psr.add_redshift(source)
 
-        pta = PTACorrelationDetector(pulsars)
-        a = pta.image_point(grid, refine_beams = True)
+        ptanew = PTACorrelationDetector(pulsarsnew)
+        a = ptanew.image_point(grid, refine_beams = True)
 
         if crop is not None:
             phi = phi[nh - crop : nh + crop, nh - crop : nh + crop]
@@ -733,9 +729,9 @@ class PTACorrelationDetector:
 
 if __name__ == "__main__":
     # Example usage with default parameters
-    n = 50  # Grid size
+    n = 100  # Grid size
     center = [60, 30] * u.deg  # Center of field of view
-    n_pul = 60  # Number of pulsars to use
+    n_pul = 50  # Max number of pulsars to use
 
     # Field of view width
     width = [10, 10] * u.arcmin
@@ -753,7 +749,7 @@ if __name__ == "__main__":
                     strain = 1
                     )
 
-    center = GWSource(theta = center[1], 
+    center = GWSource(theta = center[1],
                       phi = center[0],
                       frequency = 1e-8 * u.Hz,
                       strain = 1)
@@ -763,21 +759,21 @@ if __name__ == "__main__":
 
     # Load pulsars and create detector
     pulsars = Pulsar.load_collection("pulsars")[:n_pul]
+    n_pul = min(n_pul, len(pulsars))
     pta = PTACorrelationDetector(pulsars)
 
-    #img = pta.image_svd(grid)
-
     # Reconstruct the sky image
-    #img = pta.image_point(grid, refine_beams = True)
-    dirty_beam, psf = pta.image_psf(grid, crop = 15)
-    img = pta.image_clean(grid, gain = 3e-1, n_iter = 30)
+    img = pta.image_clean(grid, gain = 1, n_iter = 33)
+    dirty_beam, psf = pta.image_psf(grid)
     img = convolve2d(img, psf, mode = "same") / np.max(psf)
 
+    np.save(f"maps/conv", img)
 
 
 
-    #plt.figure(figsize = (4, 4)) # view format 
-    plt.figure(figsize = a4(.6, .6/np.sqrt(2))) # view format 
+
+    plt.figure(figsize = (4, 4)) # view format
+    #plt.figure(figsize = a4(.6, .6/np.sqrt(2))) # paper format
 
     plt.title(f"Clean Map $N = {n_pul}$")
     plt.xlabel(r"arcmin")
@@ -795,19 +791,19 @@ if __name__ == "__main__":
                cmap = "hot",
                extent = extent,
                )
-    #plt.colorbar()
+    plt.colorbar()
 
 
 #    # Plot PSF
 #    shifted = np.roll(psf/psf.max(), shift = (-n//3, n//3), axis = (0, 1))
-#    
+#
 #    plt.contour(shifted,
 #                levels = [.5],  # adjust number of contour levels as needed
 #                colors = "white",  # or any color that contrasts well
 #                linewidths = .7,
 #                origin = "lower",
 #                extent = extent,
-#                ) 
+#                )
 
 
     #save_eps("pta_image", tight = True)
